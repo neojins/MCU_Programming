@@ -76,11 +76,11 @@ int core0_main(void)
     {
         PORT10_OMR |= ((1<<PCL1) | (1<<PS1));           // Toggle LED RED
 
-        for(cycle = 0; cycle < 500000 ; cycle++);     // Delay
+        for(cycle = 0; cycle < 250000 ; cycle++);     // Delay
 
         PORT10_OMR |= ((1<<PCL2) | (1<<PS2));           // Toggle LED BLUE
 
-        for(cycle = 0; cycle < 500000 ; cycle++);     // Delay
+        for(cycle = 0; cycle < 250000 ; cycle++);     // Delay
     }
     return (1);
 }
