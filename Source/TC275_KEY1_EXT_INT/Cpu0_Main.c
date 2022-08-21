@@ -27,23 +27,29 @@
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
-#include "setting.h"
 
 /* Define PORT10 Registers for LED */
 #define PORT10_BASE     (0xF003B000)
 #define PORT10_IOCR0    (*(volatile unsigned int*)(PORT10_BASE + 0x10))
 #define PORT10_OMR      (*(volatile unsigned int*)(PORT10_BASE + 0x04))
 
+#define PC0             0
 #define PC1             11
+#define PC2             19
+
 #define PCL1            17
+#define PCL2            18
+
 #define PS1             1
+#define PS2             2
 
 /* Define PORT02 Registers for Switch2 */
 #define PORT02_BASE     (0xF003A200)
 #define PORT02_IOCR0    (*(volatile unsigned int*)(PORT02_BASE + 0x10))
 #define PORT02_IN       (*(volatile unsigned int*)(PORT02_BASE + 0x24))
 
-#define PC1             11
+
+#define P0              0
 #define P1              1
 
 /* Define SCU Registers for Interrupt */
@@ -54,15 +60,23 @@
 
 #define LCK             1
 #define ENDINIT         0
+
+#define IGP0            14
 #define INP0            12
 #define EIEN0           11
 #define FEN0            8
 #define EXIS0           4
-#define IGP0            14
+
+#define IGP1            30
+#define INP1            28
+#define EIEN1           27
+#define FEN1            24
+#define EXIS1           20
 
 /* Define SRC Registers for Interrupt */
 #define SRC_BASE        (0xF0038000)
-//#define SRC_SCUERU0     (*(volatile unsigned int*)(SRC_BASE + 0xCD4))
+#define SRC_SCUERU0     (*(volatile unsigned int*)(SRC_BASE + 0xCD4))
+#define SRC_SCUERU1     (*(volatile unsigned int*)(SRC_BASE + 0xCD8))
 
 #define TOS             11
 #define SRE             10
@@ -73,21 +87,22 @@ IfxCpu_syncEvent g_cpuSyncEvent = 0;
 /* Initialize LED (RED) */
 void init_LED(void)
 {
-    /* Reset PC1 in IOCR0*/
+    /* Reset PC1 & PC2 in IOCR0*/
     PORT10_IOCR0 &= ~((0x1F) << PC1);
 
-    /* Set PC1 with push-pull(2b10000) */
+    /* Set PC1 & PC2 with push-pull(2b10000) */
     PORT10_IOCR0 |= ((0x10) << PC1);
 }
 
-/* Initialize Switch2 */
+/* Initialize Switch */
 void init_Switch(void)
 {
-    /* Reset PC1 in IOCR0*/
+    /* Reset PC1 and PC0 in IOCR0*/
     PORT02_IOCR0 &= ~((0x1F) << PC1);
 
-    /* Set PC1 with push-pull(2b0xx10) */
+    /* Set PC1 and PC0 with pull-up(2b0xx10) */
     PORT02_IOCR0 |= ((0x2) << PC1);
+
 }
 
 /* Initialize External Request Unit (ERU) */
@@ -99,29 +114,36 @@ void init_ERU(void)
     while((SCU_WDTSCON0 & (1 << LCK)) != 0);
 
     // Modify Access to clear ENDINIT bit
-    SCU_WDTSCON0 = ((SCU_WDTSCON0 ^ 0xFC) | (1 << LCK)) & ~ (1 << ENDINIT);
+    SCU_WDTSCON0 = ((SCU_WDTSCON0 ^ 0xFC) | (1 << LCK)) & ~(1 << ENDINIT);
     while((SCU_WDTSCON0 & (1 << LCK)) == 0);
 
-    SCU_EICR1 &= ~((0x7) << EXIS0);             // External input 1 is selected
-    SCU_EICR1 |= ((0x1) << EXIS0);
+    SCU_EICR1 &= (~((0x7) << EXIS0)) & (~((0x7) << INP0));      // Input Node Pointer Clear
 
-    SCU_EICR1 |= (1 << FEN0);                   // Falling edge enable
+    SCU_EICR1 |= (0x1 << EXIS0);                            // P02.1 select
 
-    SCU_EICR1 |= ((0x1) << EIEN0);              // The trigger event is enabled
+    SCU_EICR1 |= (0x1 << FEN0);                             // Falling edge enable
 
-    SCU_EICR1 &= ~((0x7) << INP0);              // An event from input ETL 2 triggers output OGU 0
+    SCU_EICR1 |= (0x1 << EIEN0);                            // The trigger event is enabled
 
-    SCU_IGCR0 &= ~((0x3) << IGP0);              // IOUT(0) is activated in response to a trigger event
-    SCU_IGCR0 |= ((0x1) << IGP0);               // The pattern is not considered
+    SCU_EICR1 |= (0x0 << INP0);                             // Trigger Input Channel 2 -> Output Channel 0
 
+    SCU_IGCR0 |= (0x1 << IGP0);                             // Input Channel 2 activated, pattern is not considered
+
+    /* Password Access to unlock WDTSCON0 */
+    SCU_WDTSCON0 = ((SCU_WDTSCON0 ^ 0xFC) & ~(1 << LCK)) | (1 << ENDINIT);
+    while((SCU_WDTSCON0 & (1 << LCK)) != 0);
+
+    /* Modify Access to set ENDINIT bit */
+    SCU_WDTSCON0 = ((SCU_WDTSCON0 ^ 0xFC) | (1 << LCK)) & ~(1 << ENDINIT);
+    while((SCU_WDTSCON0 & (1 << LCK)) == 0);
 
     /* SRC Interrupt Setting For ECU */
     SRC_SCUERU0 &= ~((0xFF) << SRPN);           // Set Priority : 0x0A
     SRC_SCUERU0 |= ((0x0A) << SRPN);
 
-    SRC_SCUERU0 &= ~((0x3) << TOS);             // CPU0 services
-
     SRC_SCUERU0 |= (1 << SRE);                  // Service Request is enabled
+    SRC_SCUERU1 &= ~((0x3) << TOS);             // CPU0 services
+
 }
 
 int core0_main(void)
@@ -153,3 +175,4 @@ void ERU0_ISR(void)
 {
     PORT10_OMR |= ((1<<PCL1) | (1<<PS1));           // Toggle LED RED
 }
+
